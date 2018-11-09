@@ -95,8 +95,14 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 		b.importQueue.Unlock()
 	}
 
+	//defer func() {
+	//	if r := recover(); r!= nil {
+	//		fmt.Println("recovered from ", r)
+	//	}
+	//}()
 	log.Printf("Getting import lock for path %s", lockPath)
-	importLockEntry, err := req.Storage.Get(ctx, lockPath)
+	var importLockEntry *logical.StorageEntry
+	importLockEntry, err = req.Storage.Get(ctx, lockPath)
 	if err != nil {
 		log.Printf("Unable to get lock import for role %s:\n %s\n", roleName, err)
 		unlock()
