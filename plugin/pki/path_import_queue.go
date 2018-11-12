@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/vault/logical/framework"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -166,6 +167,7 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 			return
 		}
 
+		var wg sync.WaitGroup
 		for i, sn := range entries {
 
 			log.Printf("Trying to import certificate with SN %s at pos %d", sn, i)
