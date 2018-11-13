@@ -163,7 +163,7 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 
 	log.Println("!!!!Starting new import routine!!!!")
 	//TODO: remove after release, made for easier testing
-	time.Sleep(time.Duration(15) * time.Second)
+	time.Sleep(time.Duration(30) * time.Second)
 	for {
 		entries, err := req.Storage.List(ctx, importPath)
 		if err != nil {
@@ -190,6 +190,7 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 		//}
 		noOfWorkers := 2
 		if len(entries) > 0 {
+			log.Println("Creating jobs on len", len(entries))
 			var jobs = make(chan Job, len(entries))
 			var results = make(chan Result, len(entries))
 			startTime := time.Now()
