@@ -23,6 +23,11 @@ type Job struct {
 	req        *logical.Request
 }
 
+type Result struct {
+	job       Job
+	processed bool
+}
+
 // This returns the list of queued for import to TPP certificates
 func pathImportQueue(b *backend) *framework.Path {
 	ret := &framework.Path{
@@ -157,6 +162,8 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 	}()
 
 	log.Println("!!!!Starting new import routine!!!!")
+	//TODO: remove after release, made for easier testing
+	time.Sleep(time.Duration(15) * time.Second)
 	for {
 		entries, err := req.Storage.List(ctx, importPath)
 		if err != nil {
@@ -181,11 +188,19 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 		//b.processImportToTPP(ctx, req, roleName, sn, i, importPath, &wg)
 
 		//}
-		noOfWorkers := 3
+		noOfWorkers := 2
 		if len(entries) > 0 {
 			var jobs = make(chan Job, len(entries))
+			var results = make(chan Result, len(entries))
+			startTime := time.Now()
 			go b.allocate(len(entries), jobs, entries, ctx, req, roleName, importPath)
-			b.createWorkerPool(noOfWorkers, jobs)
+			done := make(chan bool)
+			go result(done, results)
+			b.createWorkerPool(noOfWorkers, results, jobs)
+			<-done
+			endTime := time.Now()
+			diff := endTime.Sub(startTime)
+			log.Println("total time taken ", diff.Seconds(), "seconds")
 			//TODO: if will process only amount of entries equal to noOfWorkers, need to wait untill all entries will be processed
 		}
 		log.Println("Waiting for next turn")
@@ -195,18 +210,27 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 	return
 }
 
-func (b *backend) createWorkerPool(noOfWorkers int, jobs chan Job) {
+func (b *backend) createWorkerPool(noOfWorkers int, results chan Result, jobs chan Job) {
 	var wg sync.WaitGroup
 	for i := 0; i < noOfWorkers; i++ {
 		wg.Add(1)
-		go b.worker(&wg, jobs)
+		go b.worker(&wg, results, jobs)
 	}
 	wg.Wait()
+	close(results)
 }
 
-func (b *backend) worker(wg *sync.WaitGroup, jobs chan Job) {
+func result(done chan bool, results chan Result) {
+	for result := range results {
+		log.Printf("Job id %d, Processed entry: %s , result: %v\n", result.job.id, result.job.entry, result.processed)
+	}
+	done <- true
+}
+
+func (b *backend) worker(wg *sync.WaitGroup, results chan Result, jobs chan Job) {
 	for job := range jobs {
-		b.processImportToTPP(job)
+		output := Result{job, b.processImportToTPP(job)}
+		results <- output
 	}
 	wg.Done()
 }
@@ -228,7 +252,7 @@ func (b *backend) allocate(noOfJobs int, jobs chan Job, entries []string, ctx co
 	close(jobs)
 }
 
-func (b *backend) processImportToTPP(job Job) {
+func (b *backend) processImportToTPP(job Job) bool {
 	ctx := job.ctx
 	req := job.req
 	roleName := job.roleName
@@ -272,7 +296,7 @@ func (b *backend) processImportToTPP(job Job) {
 		importResp, err := cl.ImportCertificate(importReq)
 		if err != nil {
 			log.Printf("%s could not import certificate: %s", msg, err)
-			return
+			return false
 		}
 		log.Printf("%s Certificate imported:\n %s", msg, pp(importResp))
 		log.Printf("%s Removing certificate from import path %s", msg, importPath+entry)
@@ -292,6 +316,7 @@ func (b *backend) processImportToTPP(job Job) {
 
 	//There will be no new entries, need to find a way to refresh them. Try recursion here
 
+	return true
 }
 
 func (b *backend) cleanupImportToTPP(roleName string, ctx context.Context, req *logical.Request) {
