@@ -24,8 +24,8 @@ type Job struct {
 }
 
 type Result struct {
-	job       Job
-	processed string
+	job    Job
+	result string
 }
 
 // This returns the list of queued for import to TPP certificates
@@ -223,7 +223,7 @@ func (b *backend) createWorkerPool(noOfWorkers int, results chan Result, jobs ch
 
 func result(done chan bool, results chan Result) {
 	for result := range results {
-		log.Printf("Job id: %d ### Processed entry: %s , processed: %v\n", result.job.id, result.job.entry, result.processed)
+		log.Printf("Job id: %d ### Processed entry: %s , result:\n %v\n", result.job.id, result.job.entry, result.result)
 	}
 	done <- true
 }
