@@ -186,6 +186,7 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 			var jobs = make(chan Job, len(entries))
 			go b.allocate(len(entries), jobs, entries, ctx, req, roleName, importPath)
 			b.createWorkerPool(noOfWorkers, jobs)
+			//TODO: if will process only amount of entries equal to noOfWorkers, need to wait untill all entries will be processed
 		}
 		log.Println("Waiting for next turn")
 		time.Sleep(time.Duration(role.TPPImportTimeout) * time.Second)
@@ -201,13 +202,10 @@ func (b *backend) createWorkerPool(noOfWorkers int, jobs chan Job) {
 		go b.worker(&wg, jobs)
 	}
 	wg.Wait()
-	//close(results)
 }
 
 func (b *backend) worker(wg *sync.WaitGroup, jobs chan Job) {
 	for job := range jobs {
-		//output := Result{job, b.processImportToTPP(ctx, req, roleName, sn, i, importPath)}
-		//results <- output
 		b.processImportToTPP(job)
 	}
 	wg.Done()
@@ -217,7 +215,6 @@ func (b *backend) allocate(noOfJobs int, jobs chan Job, entries []string, ctx co
 	for i := 0; i < noOfJobs; i++ {
 		entry := entries[i]
 		log.Printf("Allocating job for entry %s", entry)
-		//entry := fmt.Sprintf("%s",e)
 		job := Job{
 			id:         i,
 			entry:      entry,
@@ -235,18 +232,19 @@ func (b *backend) processImportToTPP(job Job) {
 	ctx := job.ctx
 	req := job.req
 	roleName := job.roleName
-	sn := job.entry
-	i := job.id
+	entry := job.entry
+	id := job.id
+	msg := fmt.Sprintf("Job id: %v ###", id)
 	importPath := job.importPath
-	log.Printf("Processing job id %v with entry %s\n", job.id, job.entry)
-	log.Printf("Trying to import certificate with SN %s at pos %d", sn, i)
+	log.Printf("%s Processing entry %s\n", msg, entry)
+	log.Printf("%s Trying to import certificate with SN %s", msg, entry)
 	cl, err := b.ClientVenafi(ctx, req.Storage, req, roleName)
 	if err != nil {
-		log.Printf("Could not create venafi client: %s", err)
+		log.Printf("%s Could not create venafi client: %s", msg, err)
 	} else {
-		certEntry, err := req.Storage.Get(ctx, importPath+sn)
+		certEntry, err := req.Storage.Get(ctx, importPath+entry)
 		if err != nil {
-			log.Printf("Could not get certificate from %s: %s", importPath+sn, err)
+			log.Printf("%s Could not get certificate from %s: %s", msg, importPath+entry, err)
 		}
 		block := pem.Block{
 			Type:  "CERTIFICATE",
@@ -255,13 +253,13 @@ func (b *backend) processImportToTPP(job Job) {
 
 		Certificate, err := x509.ParseCertificate(certEntry.Value)
 		if err != nil {
-			log.Printf("Could not get certificate from entry %s: %s", importPath+sn, err)
+			log.Printf("%s Could not get certificate from entry %s: %s", msg, importPath+entry, err)
 		}
 		//TODO: here we should check for existing CN and set it to DNS or throw error
 		cn := Certificate.Subject.CommonName
 
 		certString := string(pem.EncodeToMemory(&block))
-		log.Printf("Importing cert to %s:\n %s", cn, certString)
+		log.Printf("%s Importing cert to %s:\n %s", msg, cn, certString)
 
 		importReq := &certificate.ImportRequest{
 			// if PolicyDN is empty, it is taken from cfg.Zone
@@ -273,21 +271,21 @@ func (b *backend) processImportToTPP(job Job) {
 		}
 		importResp, err := cl.ImportCertificate(importReq)
 		if err != nil {
-			log.Printf("could not import certificate: %s", err)
+			log.Printf("%s could not import certificate: %s", msg, err)
 			return
 		}
-		log.Printf("Certificate imported:\n %s", pp(importResp))
-		log.Printf("Removing certificate from import path %s", importPath+sn)
-		err = req.Storage.Delete(ctx, importPath+sn)
+		log.Printf("%s Certificate imported:\n %s", msg, pp(importResp))
+		log.Printf("%s Removing certificate from import path %s", msg, importPath+entry)
+		err = req.Storage.Delete(ctx, importPath+entry)
 		if err != nil {
-			log.Printf("Could not delete %s from queue: %s", importPath+sn, err)
+			log.Printf("%s Could not delete %s from queue: %s", msg, importPath+entry, err)
 		} else {
-			log.Printf("Certificate with SN %s removed from queue", sn)
+			log.Printf("%s Certificate with SN %s removed from queue", msg, entry)
 			entries, err := req.Storage.List(ctx, importPath)
 			if err != nil {
-				log.Printf("Could not get queue list: %s", err)
+				log.Printf("%s Could not get queue list: %s", msg, err)
 			} else {
-				log.Printf("Queue for path %s is:\n %s", importPath, entries)
+				log.Printf("%s Queue for path %s is:\n %s", msg, importPath, entries)
 			}
 		}
 	}
