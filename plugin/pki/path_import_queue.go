@@ -181,11 +181,11 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 		//b.processImportToTPP(ctx, req, roleName, sn, i, importPath, &wg)
 
 		//}
-		//noOfWorkers := 3
+		noOfWorkers := 3
 		if len(entries) > 0 {
 			var jobs = make(chan Job, len(entries))
 			go b.allocate(len(entries), jobs, entries, ctx, req, roleName, importPath)
-			//b.createWorkerPool(noOfWorkers, jobs, ctx context.Context, req *logical.Request, roleName string, sn string, i int, importPath string)
+			b.createWorkerPool(noOfWorkers, jobs)
 		}
 		log.Println("Waiting for next turn")
 		time.Sleep(time.Duration(role.TPPImportTimeout) * time.Second)
