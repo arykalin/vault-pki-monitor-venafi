@@ -25,7 +25,7 @@ type Job struct {
 
 type Result struct {
 	job       Job
-	processed bool
+	processed string
 }
 
 // This returns the list of queued for import to TPP certificates
@@ -223,7 +223,7 @@ func (b *backend) createWorkerPool(noOfWorkers int, results chan Result, jobs ch
 
 func result(done chan bool, results chan Result) {
 	for result := range results {
-		log.Printf("Job id %d, Processed entry: %s , result: %v\n", result.job.id, result.job.entry, result.processed)
+		log.Printf("Job id: %d ### Processed entry: %s , processed: %v\n", result.job.id, result.job.entry, result.processed)
 	}
 	done <- true
 }
@@ -253,7 +253,7 @@ func (b *backend) allocate(noOfJobs int, jobs chan Job, entries []string, ctx co
 	close(jobs)
 }
 
-func (b *backend) processImportToTPP(job Job) bool {
+func (b *backend) processImportToTPP(job Job) string {
 	ctx := job.ctx
 	req := job.req
 	roleName := job.roleName
@@ -265,59 +265,59 @@ func (b *backend) processImportToTPP(job Job) bool {
 	log.Printf("%s Trying to import certificate with SN %s", msg, entry)
 	cl, err := b.ClientVenafi(ctx, req.Storage, req, roleName)
 	if err != nil {
-		log.Printf("%s Could not create venafi client: %s", msg, err)
+		return (fmt.Sprintf("%s Could not create venafi client: %s", msg, err))
+	}
+
+	certEntry, err := req.Storage.Get(ctx, importPath+entry)
+	if err != nil {
+		return (fmt.Sprintf("%s Could not get certificate from %s: %s", msg, importPath+entry, err))
+	}
+	block := pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certEntry.Value,
+	}
+
+	Certificate, err := x509.ParseCertificate(certEntry.Value)
+	if err != nil {
+		return (fmt.Sprintf("%s Could not get certificate from entry %s: %s", msg, importPath+entry, err))
+	}
+	//TODO: here we should check for existing CN and set it to DNS or throw error
+	cn := Certificate.Subject.CommonName
+
+	certString := string(pem.EncodeToMemory(&block))
+	log.Printf("%s Importing cert to %s:\n %s", msg, cn, certString)
+
+	importReq := &certificate.ImportRequest{
+		// if PolicyDN is empty, it is taken from cfg.Zone
+		ObjectName:      cn,
+		CertificateData: certString,
+		PrivateKeyData:  "",
+		Password:        "",
+		Reconcile:       false,
+	}
+	importResp, err := cl.ImportCertificate(importReq)
+	if err != nil {
+		return (fmt.Sprintf("%s could not import certificate: %s\n", msg, err))
+		 
+	}
+	log.Printf("%s Certificate imported:\n %s", msg, pp(importResp))
+	log.Printf("%s Removing certificate from import path %s", msg, importPath+entry)
+	err = req.Storage.Delete(ctx, importPath+entry)
+	if err != nil {
+		log.Printf("%s Could not delete %s from queue: %s", msg, importPath+entry, err)
 	} else {
-		certEntry, err := req.Storage.Get(ctx, importPath+entry)
+		log.Printf("%s Certificate with SN %s removed from queue", msg, entry)
+		entries, err := req.Storage.List(ctx, importPath)
 		if err != nil {
-			log.Printf("%s Could not get certificate from %s: %s", msg, importPath+entry, err)
-		}
-		block := pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: certEntry.Value,
-		}
-
-		Certificate, err := x509.ParseCertificate(certEntry.Value)
-		if err != nil {
-			log.Printf("%s Could not get certificate from entry %s: %s", msg, importPath+entry, err)
-		}
-		//TODO: here we should check for existing CN and set it to DNS or throw error
-		cn := Certificate.Subject.CommonName
-
-		certString := string(pem.EncodeToMemory(&block))
-		log.Printf("%s Importing cert to %s:\n %s", msg, cn, certString)
-
-		importReq := &certificate.ImportRequest{
-			// if PolicyDN is empty, it is taken from cfg.Zone
-			ObjectName:      cn,
-			CertificateData: certString,
-			PrivateKeyData:  "",
-			Password:        "",
-			Reconcile:       false,
-		}
-		importResp, err := cl.ImportCertificate(importReq)
-		if err != nil {
-			log.Printf("%s could not import certificate: %s", msg, err)
-			return false
-		}
-		log.Printf("%s Certificate imported:\n %s", msg, pp(importResp))
-		log.Printf("%s Removing certificate from import path %s", msg, importPath+entry)
-		err = req.Storage.Delete(ctx, importPath+entry)
-		if err != nil {
-			log.Printf("%s Could not delete %s from queue: %s", msg, importPath+entry, err)
+			log.Printf("%s Could not get queue list: %s", msg, err)
 		} else {
-			log.Printf("%s Certificate with SN %s removed from queue", msg, entry)
-			entries, err := req.Storage.List(ctx, importPath)
-			if err != nil {
-				log.Printf("%s Could not get queue list: %s", msg, err)
-			} else {
-				log.Printf("%s Queue for path %s is:\n %s", msg, importPath, entries)
-			}
+			log.Printf("%s Queue for path %s is:\n %s", msg, importPath, entries)
 		}
 	}
+	return pp(importResp)
 
 	//There will be no new entries, need to find a way to refresh them. Try recursion here
 
-	return true
 }
 
 func (b *backend) cleanupImportToTPP(roleName string, ctx context.Context, req *logical.Request) {
