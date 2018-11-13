@@ -183,11 +183,6 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 			return
 		}
 
-		//TODO: get amount of entries which equal to amount of workers and process them
-		//for i, sn := range entries {
-		//b.processImportToTPP(ctx, req, roleName, sn, i, importPath, &wg)
-
-		//}
 		noOfWorkers := 2
 		if len(entries) > 0 {
 			log.Println("Creating jobs on len", len(entries))
@@ -202,7 +197,6 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 			endTime := time.Now()
 			diff := endTime.Sub(startTime)
 			log.Println("total time taken ", diff.Seconds(), "seconds")
-			//TODO: if will process only amount of entries equal to noOfWorkers, need to wait untill all entries will be processed
 		}
 		log.Println("Waiting for next turn")
 		time.Sleep(time.Duration(role.TPPImportTimeout) * time.Second)
@@ -265,12 +259,12 @@ func (b *backend) processImportToTPP(job Job) string {
 	log.Printf("%s Trying to import certificate with SN %s", msg, entry)
 	cl, err := b.ClientVenafi(ctx, req.Storage, req, roleName)
 	if err != nil {
-		return (fmt.Sprintf("%s Could not create venafi client: %s", msg, err))
+		return fmt.Sprintf("%s Could not create venafi client: %s", msg, err)
 	}
 
 	certEntry, err := req.Storage.Get(ctx, importPath+entry)
 	if err != nil {
-		return (fmt.Sprintf("%s Could not get certificate from %s: %s", msg, importPath+entry, err))
+		return fmt.Sprintf("%s Could not get certificate from %s: %s", msg, importPath+entry, err)
 	}
 	block := pem.Block{
 		Type:  "CERTIFICATE",
@@ -279,7 +273,7 @@ func (b *backend) processImportToTPP(job Job) string {
 
 	Certificate, err := x509.ParseCertificate(certEntry.Value)
 	if err != nil {
-		return (fmt.Sprintf("%s Could not get certificate from entry %s: %s", msg, importPath+entry, err))
+		return fmt.Sprintf("%s Could not get certificate from entry %s: %s", msg, importPath+entry, err)
 	}
 	//TODO: here we should check for existing CN and set it to DNS or throw error
 	cn := Certificate.Subject.CommonName
@@ -297,7 +291,7 @@ func (b *backend) processImportToTPP(job Job) string {
 	}
 	importResp, err := cl.ImportCertificate(importReq)
 	if err != nil {
-		return (fmt.Sprintf("%s could not import certificate: %s\n", msg, err))
+		return fmt.Sprintf("%s could not import certificate: %s\n", msg, err)
 		 
 	}
 	log.Printf("%s Certificate imported:\n %s", msg, pp(importResp))
