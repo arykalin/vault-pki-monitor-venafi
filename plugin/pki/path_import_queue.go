@@ -15,12 +15,12 @@ import (
 )
 
 type Job struct {
-	id       int
-	entry string
-}
-type Result struct {
-	job         Job
-	//processed string
+	id         int
+	entry      string
+	roleName   string
+	importPath string
+	ctx        context.Context
+	req        *logical.Request
 }
 
 // This returns the list of queued for import to TPP certificates
@@ -176,10 +176,16 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 			return
 		}
 
-		var wg sync.WaitGroup
 		//TODO: get amount of entries which equal to amount of workers and process them
-		for i, sn := range entries {
-			b.processImportToTPP(ctx, req, roleName, sn, i, importPath, &wg)
+		//for i, sn := range entries {
+		//b.processImportToTPP(ctx, req, roleName, sn, i, importPath, &wg)
+
+		//}
+		//noOfWorkers := 3
+		if len(entries) > 0 {
+			var jobs = make(chan Job, len(entries))
+			go b.allocate(len(entries), jobs, entries, ctx, req, roleName, importPath)
+			//b.createWorkerPool(noOfWorkers, jobs, ctx context.Context, req *logical.Request, roleName string, sn string, i int, importPath string)
 		}
 		log.Println("Waiting for next turn")
 		time.Sleep(time.Duration(role.TPPImportTimeout) * time.Second)
@@ -188,16 +194,50 @@ func (b *backend) importToTPP(roleName string, ctx context.Context, req *logical
 	return
 }
 
-func (b *backend) worker(wg *sync.WaitGroup, results chan Result, jobs chan Job, ctx context.Context, req *logical.Request, roleName string, sn string, i int, importPath string) {
+func (b *backend) createWorkerPool(noOfWorkers int, jobs chan Job) {
+	var wg sync.WaitGroup
+	for i := 0; i < noOfWorkers; i++ {
+		wg.Add(1)
+		go b.worker(&wg, jobs)
+	}
+	wg.Wait()
+	//close(results)
+}
+
+func (b *backend) worker(wg *sync.WaitGroup, jobs chan Job) {
 	for job := range jobs {
 		//output := Result{job, b.processImportToTPP(ctx, req, roleName, sn, i, importPath)}
 		//results <- output
-		b.processImportToTPP(ctx, req, roleName, sn, i, importPath, job)
+		b.processImportToTPP(job)
 	}
 	wg.Done()
 }
 
-func (b *backend) processImportToTPP(ctx context.Context, req *logical.Request, roleName string, sn string, i int, importPath string, job Job) {
+func (b *backend) allocate(noOfJobs int, jobs chan Job, entries []string, ctx context.Context, req *logical.Request, roleName string, importPath string) {
+	for i := 0; i < noOfJobs; i++ {
+		entry := entries[i]
+		log.Printf("Allocating job for entry %s", entry)
+		//entry := fmt.Sprintf("%s",e)
+		job := Job{
+			id:         i,
+			entry:      entry,
+			importPath: importPath,
+			roleName:   roleName,
+			req:        req,
+			ctx:        ctx,
+		}
+		jobs <- job
+	}
+	close(jobs)
+}
+
+func (b *backend) processImportToTPP(job Job) {
+	ctx := job.ctx
+	req := job.req
+	roleName := job.roleName
+	sn := job.entry
+	i := job.id
+	importPath := job.importPath
 	log.Printf("Processing job id %v with entry %s\n", job.id, job.entry)
 	log.Printf("Trying to import certificate with SN %s at pos %d", sn, i)
 	cl, err := b.ClientVenafi(ctx, req.Storage, req, roleName)
